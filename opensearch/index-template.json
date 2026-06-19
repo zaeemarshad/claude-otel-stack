@@ -1,0 +1,34 @@
+{
+  "index_patterns": ["ss4o_logs-claudecode-*"],
+  "priority": 200,
+  "data_stream": {},
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+      "plugins.index_state_management.policy_id": "claude-code-retention"
+    },
+    "mappings": {
+      "properties": {
+        "@timestamp": { "type": "date" },
+        "observedTimestamp": { "type": "date" },
+        "body": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 1024 } } },
+        "attributes": {
+          "properties": {
+            "prompt": { "properties": { "id": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } } } },
+            "project": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
+            "file_path": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 1024 } } },
+            "command": { "type": "text", "fields": { "keyword": { "type": "keyword", "ignore_above": 4096 } } },
+            "cost_usd": { "type": "float" },
+            "duration_ms": { "type": "long" },
+            "input_tokens": { "type": "long" },
+            "output_tokens": { "type": "long" },
+            "cache_read_tokens": { "type": "long" },
+            "cache_creation_tokens": { "type": "long" },
+            "status_code": { "type": "long" }
+          }
+        }
+      }
+    }
+  }
+}

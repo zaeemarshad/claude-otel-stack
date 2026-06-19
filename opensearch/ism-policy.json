@@ -1,0 +1,27 @@
+{
+  "policy": {
+    "description": "Claude Code telemetry retention: roll the data stream over daily, delete backing indices older than 90 days.",
+    "default_state": "hot",
+    "states": [
+      {
+        "name": "hot",
+        "actions": [
+          { "rollover": { "min_index_age": "1d" } }
+        ],
+        "transitions": [
+          { "state_name": "delete", "conditions": { "min_index_age": "90d" } }
+        ]
+      },
+      {
+        "name": "delete",
+        "actions": [
+          { "delete": {} }
+        ],
+        "transitions": []
+      }
+    ],
+    "ism_template": [
+      { "index_patterns": ["ss4o_logs-claudecode-*"], "priority": 100 }
+    ]
+  }
+}

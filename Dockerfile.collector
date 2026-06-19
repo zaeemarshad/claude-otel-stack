@@ -1,0 +1,16 @@
+# The official otel/opentelemetry-collector-contrib image is FROM scratch with a
+# dynamically-linked binary (interpreter /lib/ld-linux-aarch64.so.1). Under some
+# container runtimes the loader isn't resolvable, so exec fails with
+# "no such file or directory". We copy that binary onto a glibc base (debian-slim)
+# via a multi-stage build: the upstream binary is pulled at build time, so no
+# local ./otelcol-contrib copy is needed.
+ARG COLLECTOR_VERSION=0.116.0
+
+FROM otel/opentelemetry-collector-contrib:${COLLECTOR_VERSION} AS upstream
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=upstream /otelcol-contrib /otelcol-contrib
+ENTRYPOINT ["/otelcol-contrib"]

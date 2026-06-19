@@ -1,0 +1,67 @@
+# OTel Collector (contrib) config: receive OTLP from Claude Code, write logs to OpenSearch.
+# Logs + traces pipelines (Claude Code emits logs/events and, in beta, traces).
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Enrich tool events: Claude Code emits no project/file/command fields, but the
+  # tool_input string (captured via OTEL_LOG_TOOL_DETAILS=1) contains them. Extract
+  # them into first-class attributes so the dashboards can group "what a session did".
+  # error_mode: ignore => a record whose tool_input doesn't match a pattern is left
+  # untouched rather than failing the batch.
+  transform:
+    error_mode: ignore
+    log_statements:
+      - context: log
+        statements:
+          # project = first path segment under the user's home (e.g. .../claude-otel-stack).
+          # Restricted to real dir-name chars so paths embedded in Bash commands don't
+          # leak shell metacharacters/whitespace into the value.
+          - 'merge_maps(attributes, ExtractPatterns(attributes["tool_input"], "(?:/Users|/home)/[^/]+/(?P<project>[A-Za-z0-9._-]+)"), "upsert") where attributes["tool_input"] != nil'
+          # file_path = the Read/Edit/Write target
+          - 'merge_maps(attributes, ExtractPatterns(attributes["tool_input"], "\"file_path\":\"(?P<file_path>[^\"]+)\""), "upsert") where attributes["tool_input"] != nil'
+          # command = the Bash command
+          - 'merge_maps(attributes, ExtractPatterns(attributes["tool_input"], "\"command\":\"(?P<command>[^\"]+)\""), "upsert") where attributes["tool_input"] != nil'
+          # MCP tool calls all arrive with tool_name="mcp_tool"; the real server/tool
+          # names live in tool_parameters. Extract them and rebuild tool_name as
+          # "<server>:<tool>" so the dashboards rank actual MCP tools (e.g.
+          # "myserver:search") instead of one opaque "mcp_tool" bucket.
+          - 'merge_maps(attributes, ExtractPatterns(attributes["tool_parameters"], "\"mcp_server_name\":\"(?P<mcp_server_name>[^\"]+)\""), "upsert") where attributes["tool_parameters"] != nil'
+          - 'merge_maps(attributes, ExtractPatterns(attributes["tool_parameters"], "\"mcp_tool_name\":\"(?P<mcp_tool_name>[^\"]+)\""), "upsert") where attributes["tool_parameters"] != nil'
+          - 'set(attributes["tool_name"], Concat([attributes["mcp_server_name"], attributes["mcp_tool_name"]], ":")) where attributes["tool_name"] == "mcp_tool" and attributes["mcp_server_name"] != nil and attributes["mcp_tool_name"] != nil'
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+exporters:
+  opensearch:
+    http:
+      endpoint: http://opensearch:9200
+    # Logs land in index: ss4o_logs-<dataset>-<namespace>
+    dataset: claudecode
+    namespace: telemetry
+  debug:
+    verbosity: normal
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [transform, batch]
+      exporters: [opensearch, debug]
+    # Traces are a Claude Code beta (CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1 +
+    # OTEL_TRACES_EXPORTER=otlp). The opensearch exporter routes spans to
+    # ss4o_traces-claudecode-telemetry automatically (by signal type); the
+    # logs-only transform processor is not applied here.
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [opensearch, debug]
+  telemetry:
+    logs:
+      level: info

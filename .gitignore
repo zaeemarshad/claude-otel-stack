@@ -1,0 +1,5 @@
+# Local data-dir override (machine-specific host path) — see migrate-data-dir.sh
+/.env
+
+# Data-volume backups created before upgrades
+/backups/
