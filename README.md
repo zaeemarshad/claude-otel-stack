@@ -31,7 +31,7 @@ Claude Code can emit three OTLP signals — **logs/events**, **metrics** and
 - **Logs/events** carry everything the dashboard needs — `tool_name`, `success`,
   `duration_ms`, `cost_usd`, `input/output_tokens`, `model`, `decision`. They land
   in the OpenSearch **data stream** `ss4o_logs-claudecode-telemetry` (ss4o
-  observability schema), which rolls over daily with 90-day retention (see
+  observability schema), which rolls over daily with 2-year retention (see
   [Data retention](#data-retention-data-stream--ism)). Event fields live under
   `attributes.*` and the event type is in `body` (e.g. `claude_code.tool_result`).
 - **Traces** are a Claude Code beta (`CLAUDE_CODE_ENHANCED_TELEMETRY_BETA`);
@@ -172,13 +172,13 @@ managed by an ISM policy (`claude-code-retention`, `opensearch/ism-policy.json`)
 
 - **Daily rollover** — the data stream rolls to a new backing index once the
   current one is a day old (`rollover.min_index_age: 1d`).
-- **90-day retention** — a backing index is deleted once it reaches 90 days
-  (`transition … min_index_age: 90d`).
+- **2-year retention** — a backing index is deleted once it reaches 730 days
+  (`transition … min_index_age: 730d`).
 
 `setup.sh` creates the policy and a data-stream index template (the template
 carries the `policy_id`, and the policy's `ism_template` auto-attaches the policy
 to every new backing index). No cron needed. To prune more aggressively than the
-policy, lower the `90d` transition in `opensearch/ism-policy.json` and re-run
+policy, lower the `730d` transition in `opensearch/ism-policy.json` and re-run
 `./scripts/start.sh`.
 
 ### Data stream migration (existing installs)
@@ -247,7 +247,10 @@ docker run --rm -v claude-otel-stack_opensearch-data:/data:ro \
   tar czf /backup/opensearch-data-$(date +%Y%m%d-%H%M%S).tar.gz -C /data .
 ```
 
-OpenSearch / Dashboards are pinned to 3.7.0 in `docker-compose.yml`; a 2.x volume
+OpenSearch / Dashboards are pinned to 3.8.0 in `docker-compose.yml`. The OpenSearch
+image is built from `Dockerfile.opensearch`, which adds the Prometheus exporter
+plugin (metrics at `http://localhost:9200/_prometheus/metrics`). The plugin version
+must match the OpenSearch version exactly. A 2.x volume
 upgrades in place on first 3.x boot (existing indices are recovered).
 
 ## Teardown
@@ -298,7 +301,7 @@ docker-compose.yml            OpenSearch + Dashboards + Collector
 Dockerfile.collector          Multi-stage: upstream collector binary on glibc base
 otel-collector-config.yaml    OTLP receiver → logs + traces pipelines → opensearch
 opensearch/index-template.json  Data-stream template (mappings + ISM policy_id)
-opensearch/ism-policy.json    Retention policy: daily rollover + delete at 90 days
+opensearch/ism-policy.json    Retention policy: daily rollover + delete at 2 years
 dashboards/build-saved-objects.py  Dashboard-as-code generator
 dashboards/saved-objects.ndjson    Generated import bundle
 scripts/start.sh              Start + fully provision the stack (idempotent, self-healing; --build, --verify)

@@ -10,8 +10,8 @@
 # "Could not locate that index-pattern-field". There is no separate fix script.
 #
 # Flags:
-#   --build    (re)build the collector image first — use after changing
-#              Dockerfile.collector or the collector version. `scripts/setup.sh`
+#   --build    (re)build the collector and OpenSearch images first — use after
+#              changing a Dockerfile or the collector/OpenSearch version. `scripts/setup.sh`
 #              is just a shortcut for `start.sh --build`.
 #   --verify   after starting, push a synthetic event through the pipeline and
 #              confirm it lands in OpenSearch.

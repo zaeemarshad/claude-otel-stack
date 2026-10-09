@@ -481,7 +481,7 @@ for i, panel in enumerate(cost_panels, start=1):
     ptype = panel[5] if len(panel) > 5 else "visualization"
     pid = f"panel_{i}"
     cost_panels_json.append({
-        "version": "3.7.0",
+        "version": "3.8.0",
         "gridData": {"x": x, "y": y, "w": w, "h": h, "i": pid},
         "panelIndex": pid,
         "embeddableConfig": {},
@@ -500,7 +500,7 @@ objects.append({
         "version": 1,
         "timeRestore": True,
         "timeTo": "now",
-        "timeFrom": "now-24h",
+        "timeFrom": "now-90d",
         "refreshInterval": {"pause": False, "value": 30000},
         "kibanaSavedObjectMeta": {"searchSourceJSON": json.dumps({"query": {"language": "kuery", "query": ""}, "filter": []})},
     },

@@ -38,6 +38,7 @@ metrics pipeline. Traces are enabled by `enable-telemetry.sh` and land in
 ```
 docker-compose.yml                  OpenSearch + Dashboards + Collector
 Dockerfile.collector                Multi-stage: upstream collector binary on a glibc base
+Dockerfile.opensearch               OpenSearch + Prometheus exporter plugin
 otel-collector-config.yaml          OTLP receiver → logs + traces pipelines → opensearch
 opensearch/index-template.json      Field-type mappings for the log index
 dashboards/build-saved-objects.py   Dashboard-as-code generator
@@ -46,6 +47,7 @@ scripts/start.sh                    Start + fully provision the stack (idempoten
 scripts/setup.sh                    Shortcut for `start.sh --build` (first install / image rebuild)
 scripts/enable-telemetry.sh         Patch ~/.claude/settings.json to route usage here
 scripts/send-test-event.sh          Synthetic OTLP event for pipeline checks
+scripts/backfill-history.py         Backfill cost/usage from ~/.claude transcripts (gap before live telemetry)
 scripts/teardown.sh                 Stop the stack (--purge also deletes data)
 ```
 
@@ -55,7 +57,7 @@ The opensearch exporter writes documents into the **data stream**
 `ss4o_logs-claudecode-telemetry` (pattern `ss4o_logs-claudecode-*`; backing
 indices are `.ds-ss4o_logs-claudecode-telemetry-NNNNNN`). The data stream rolls
 over daily and an ISM policy (`claude-code-retention`) deletes backing indices at
-90 days. The exporter writes via bulk `create`, which data streams require.
+2 years. The exporter writes via bulk `create`, which data streams require.
 
 - **Time field:** `@timestamp` (date).
 - **Event type:** `body` (e.g. `claude_code.tool_result`) — aggregate on
@@ -88,6 +90,23 @@ logs-only). Unlike the logs data stream, this index has **no rollover/retention
 policy yet**; prune it manually if it grows. There is no trace dashboard — query
 spans in OpenSearch Dashboards' Discover/Observability views.
 
+**Backfilled history.** Claude Code can't replay past sessions over OTLP, but its
+session transcripts (`~/.claude/projects/*/*.jsonl`) hold token counts, models
+and tool calls. `scripts/backfill-history.py` reconstructs `api_request` and
+`tool_result` events from them and POSTs them to the collector with the original
+timestamp, so the `transform` and exporter enrich them exactly like live data.
+`cost_usd` is not in the transcripts; the script computes it from per-model,
+per-token-component rates it derives by least-squares over the live `api_request`
+docs already in OpenSearch (no hardcoded price table) — the effective rates
+Claude Code itself reported, reproduced to within ~1–3%. `opus-4-7` (absent from
+live data) borrows `opus-4-8` rates. Every backfilled doc is tagged
+`attributes.backfill=transcript`; the run is idempotent per session and, by
+default, stops at the earliest live-telemetry timestamp so it fills only the gap
+before telemetry was enabled and never double-counts. `tool_decision`,
+`user_prompt` and `duration_ms` aren't reconstructable and are omitted. History
+reaches only as far back as the oldest local transcript (Claude Code prunes them
+per `cleanupPeriodDays`); there is no older source.
+
 ## Setup / build / test commands
 
 - Everything: `./scripts/start.sh` — the single, idempotent, self-healing entry
@@ -100,6 +119,8 @@ spans in OpenSearch Dashboards' Discover/Observability views.
 - Route all Claude Code usage here (once): `./scripts/enable-telemetry.sh`,
   then restart open Claude Code sessions.
 - Smoke-test the pipeline without a live session: `./scripts/send-test-event.sh`.
+- Backfill pre-telemetry history from local session transcripts:
+  `./scripts/backfill-history.py` (`--dry-run` to preview, `--purge` to remove).
 - After editing the dashboard generator, just re-run `./scripts/start.sh` (it
   runs the generator and re-imports `saved-objects.ndjson`).
 - Tear down: `./scripts/teardown.sh` (keeps data) or `--purge` (deletes the
@@ -123,9 +144,12 @@ spans in OpenSearch Dashboards' Discover/Observability views.
   `references` entry, or panels fail with "Trying to initialize aggs without
   index pattern". The generator handles this.
 - Pin container/image versions in `docker-compose.yml` (currently OpenSearch +
-  Dashboards 3.7.0, collector 0.116.0).
+  Dashboards 3.8.0, collector 0.116.0). OpenSearch is built from
+  `Dockerfile.opensearch`, which installs the Prometheus exporter plugin. The
+  plugin version must match the OpenSearch version exactly (`3.8.0` →
+  `3.8.0.0`), so bump both together and rebuild with `./scripts/setup.sh`.
 - Storage is a data stream with an ISM retention policy
-  (`opensearch/ism-policy.json`, daily rollover + 90-day delete). The data-stream
+  (`opensearch/ism-policy.json`, daily rollover + 2-year delete). The data-stream
   template carries the `policy_id`; the policy's `ism_template` auto-attaches it
   to new backing indices. A data stream can't share a name with a plain index, so
   converting an existing plain index needs the one-time reindex migration (README).
@@ -174,6 +198,9 @@ spans in OpenSearch Dashboards' Discover/Observability views.
   `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1` and `OTEL_TRACES_EXPORTER=otlp` are set
   (enable-telemetry.sh sets both — restart Claude Code after running it). Check
   `curl localhost:9200/ss4o_traces-claudecode-*/_count`.
+- **OpenSearch's own metrics.** The Prometheus exporter plugin serves cluster,
+  node and index metrics at `http://localhost:9200/_prometheus/metrics`. These
+  are OpenSearch health metrics, not Claude Code metrics.
 - **Metrics aren't captured.** By design — the `opensearch` exporter has no
   metrics support, so this stack stores logs and traces only. Don't set
   `OTEL_METRICS_EXPORTER`; with no metrics pipeline the collector would reject the
